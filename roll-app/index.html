@@ -77,6 +77,17 @@
   .hlab{align-items:center}
   .hbody .bigcover{width:100%;max-width:210px;aspect-ratio:1/1;border:2px solid var(--ink);margin-bottom:9px;display:block;overflow:hidden;background:var(--paper-2)}
   .hbody .bigcover img{width:100%;height:100%;object-fit:cover;display:block}
+  .lb{position:fixed;inset:0;z-index:60;background:rgba(16,16,16,.94);display:none;flex-direction:column;
+    align-items:center;justify-content:center;padding:calc(20px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom))}
+  .lb.on{display:flex}
+  .lb img{max-width:100%;max-height:70vh;border:3px solid var(--paper);display:block;object-fit:contain}
+  .lb .cap{font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#B9B7AE;margin-top:12px;text-align:center}
+  .lb .cap b{display:block;font-family:'Anton',Impact,sans-serif;font-size:19px;letter-spacing:.02em;color:var(--paper);margin-bottom:3px;font-weight:400}
+  .lb .acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;justify-content:center}
+  .lb .acts button{border:2px solid var(--paper);background:transparent;color:var(--paper);padding:9px 14px;cursor:pointer;
+    font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+  .lb .acts button.danger{border-color:var(--grease);color:var(--grease)}
+  .lb .acts button.danger.arm{background:var(--grease);color:var(--paper)}
   /* ---------- strip ---------- */
   .nag{display:none;border:3px solid var(--grease);border-left-width:10px;background:rgba(214,41,30,.06);padding:9px 11px;margin-bottom:14px}
   .nag.on{display:block}
@@ -218,9 +229,8 @@
     <input id="dayTitle" placeholder="untitled" maxlength="34" autocomplete="off">
     <div class="cursor"></div>
   </div>
-  <button class="cover" id="cover" aria-label="Add a cover photo for today">
+  <button class="cover" id="cover" aria-label="Cover photo for today">
     <div class="ph"><i>+</i>Cover</div>
-    <button class="rm" id="coverRm" aria-label="Remove cover photo">×</button>
   </button>
   <input type="file" id="coverIn" accept="image/*" style="display:none">
 </section>
@@ -275,6 +285,16 @@
 </section>
 
 <div class="madein">Made in NYC · J3yrboa</div>
+
+<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="Cover photo">
+  <img id="lbImg" src="" alt="">
+  <div class="cap" id="lbCap"></div>
+  <div class="acts">
+    <button id="lbClose">Close</button>
+    <button id="lbReplace">Replace</button>
+    <button id="lbRemove" class="danger">Remove</button>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -668,34 +688,53 @@ function render(){
 
 function toast(m){const e=$('toast');e.textContent=m;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200)}
 
-$('cover').onclick=e=>{
-  if(e.target.id==='coverRm')return;
-  disarmCover();
-  $('coverIn').click();
+$('cover').onclick=async()=>{
+  const tk=todayISO();
+  const has=await photos.get(tk);
+  if(has)openLightbox(tk,true);else $('coverIn').click();
 };
-let rmArmed=false, rmTimer=null;
+let lbKey=null, rmArmed=false, rmTimer=null;
+
 function disarmCover(){
   rmArmed=false;clearTimeout(rmTimer);
-  const b=$('coverRm');
-  b.classList.remove('arm');b.textContent='\u00d7';
-  b.setAttribute('aria-label','Remove cover photo');
+  const b=$('lbRemove');
+  if(b){b.classList.remove('arm');b.textContent='Remove'}
 }
-$('coverRm').onclick=async e=>{
-  e.stopPropagation();
-  const b=$('coverRm');
+
+async function openLightbox(key,editable){
+  const d=await photos.get(key);
+  if(!d)return;
+  lbKey=key;disarmCover();
+  $('lbImg').src=d;
+  const dt=parseISO(key);
+  const t=state.titles[key];
+  $('lbCap').innerHTML=(t?'<b>'+esc(t)+'</b>':'')+
+    DAY_LABELS[dt.getDay()].toUpperCase()+' '+(dt.getMonth()+1)+'/'+dt.getDate();
+  $('lbReplace').style.display=editable?'block':'none';
+  $('lbRemove').style.display=editable?'block':'none';
+  $('lb').classList.add('on');
+}
+function closeLightbox(){$('lb').classList.remove('on');lbKey=null;disarmCover()}
+
+$('lbClose').onclick=closeLightbox;
+$('lb').onclick=e=>{if(e.target===$('lb'))closeLightbox()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('lb').classList.contains('on'))closeLightbox()});
+
+$('lbReplace').onclick=()=>{closeLightbox();$('coverIn').click()};
+
+$('lbRemove').onclick=async()=>{
+  const b=$('lbRemove');
   if(!rmArmed){
-    rmArmed=true;
-    b.classList.add('arm');b.textContent='Remove?';
-    b.setAttribute('aria-label','Tap again to confirm removing the cover photo');
-    toast('Tap again to remove');
-    clearTimeout(rmTimer);
-    rmTimer=setTimeout(disarmCover,4000);
+    rmArmed=true;b.classList.add('arm');b.textContent='Tap to confirm';
+    clearTimeout(rmTimer);rmTimer=setTimeout(disarmCover,4000);
     return;
   }
-  disarmCover();
-  await photos.del(todayISO());
-  paintCovers();toast('Cover removed');
+  const k=lbKey;
+  disarmCover();closeLightbox();
+  await photos.del(k);
+  paintCovers();render();toast('Cover removed');
 };
+
 $('coverIn').onchange=async e=>{
   const f=e.target.files&&e.target.files[0];
   e.target.value='';
@@ -723,6 +762,7 @@ async function paintCovers(){
   const tk=todayISO();
   const c=$('cover');
   const d=await photos.get(tk);
+  c.setAttribute('aria-label',d?'View cover photo for today':'Add a cover photo for today');
   const old=c.querySelector('img');
   if(old)old.remove();
   if(d){
@@ -739,6 +779,8 @@ async function paintCovers(){
     if(!v){host.remove();return}
     const im=document.createElement('img');im.src=v;im.alt='';
     host.appendChild(im);
+    host.style.cursor='zoom-in';
+    host.onclick=ev=>{ev.stopPropagation();openLightbox(host.dataset.cover,false)};
   });
 }
 
